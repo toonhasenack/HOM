@@ -123,13 +123,10 @@ def objective(params, t, T, L, dataset_idx, y):
 
 # === Initial guess & bounds ===
 p0 = [10, 10] + [0.5] * dataset_counter
-bounds_lower = [0, 0] + [0.0] * dataset_counter
-bounds_upper = [1e2, 1e2] + [1.0] * dataset_counter
-bounds = (bounds_lower, bounds_upper)
 
 # === Run optimization ===
 res = least_squares(
-    scaled_residuals, p0, bounds=bounds,
+    scaled_residuals, p0,  method="lm",
     args=(t_all, T_all, L_all, dataset_idx, y_all),
     # Optional robustness:
     # loss='soft_l1', f_scale=0.5
@@ -140,9 +137,9 @@ jacobian = res.jac
 
 # === Estimate parameter uncertainties ===
 residuals = scaled_residuals(fit_params, t_all, T_all, L_all, dataset_idx, y_all)
-dof = len(residuals) - len(fit_params) - 1
-chi2 = np.sum(residuals**2)
-sigma2 = chi2 / max(dof, 1)
+dof = len(residuals) - len(fit_params)
+res2 = np.sum(residuals**2)
+sigma2 = res2 / max(dof, 1)
 
 if jacobian is not None:
     cov = np.linalg.inv(jacobian.T @ jacobian) * sigma2
