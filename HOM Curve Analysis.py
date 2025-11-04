@@ -16,14 +16,14 @@ def fit_function(x, r, b, eta):
     t, T, L = x
     rp = r / (1 + (b * L * r) ** 2)
     rho = np.maximum(r - rp, 0)
-    eta = (2*eta - 1)**2
+    eta = (2 * eta - 1) ** 2
 
     ans = (
         1 / 4
         * (
-            (1 + eta)*erf(np.sqrt(rp / 2) * (T + t))
-            + (1 + eta)*erf(np.sqrt(rp / 2) * (T - t))
-            - (1 - eta)*np.exp(-r * t**2 / 2)
+            (1 + eta) * erf(np.sqrt(rp / 2) * (T + t))
+            + (1 + eta) * erf(np.sqrt(rp / 2) * (T - t))
+            - (1 - eta) * np.exp(-r * t**2 / 2)
             * (
                 erf(np.sqrt(rp / 2) * T + 1j * np.sqrt(rho / 2) * t)
                 + erf(np.sqrt(rp / 2) * T - 1j * np.sqrt(rho / 2) * t)
@@ -40,6 +40,7 @@ dataset_counter = 0
 for file_name in file_names:
     s = file_name.split()
     fiber_length = float(s[5].lstrip("length=").rstrip(".csv"))
+    exp_time = float(s[3].lstrip("exptime="))
     if fiber_length <= 0:
         continue
 
@@ -51,10 +52,10 @@ for file_name in file_names:
 
     coincidences /= np.max(coincidences)
     # 1. Find the index of the trough (minimum)
-    N = int(len(coincidences)/10)
+    N = int(len(coincidences) / 10)
     if N // 2 == 0:
         N += 1
-    trough_idx = np.argmin(savgol_filter(coincidences, N,1))
+    trough_idx = np.argmin(savgol_filter(coincidences, N, 1))
 
     center = stage_position[trough_idx]
 
@@ -63,7 +64,7 @@ for file_name in file_names:
     stage_position *= 1e1 / 3.0  # ps
 
     max_stage_position = 9
-    bm = np.logical_and(stage_position <= max_stage_position, stage_position >= -max_stage_position) 
+    bm = np.logical_and(stage_position <= max_stage_position, stage_position >= -max_stage_position)
     stage_position = stage_position[bm]
     coincidences = coincidences[bm]
 
@@ -80,10 +81,10 @@ for file_name in file_names:
         "coincidence_window": coincidence_window,
         "stage_position": stage_position,
         "coincidences": coincidences,
+        "exposure_time": exp_time,
     }
 
     dataset_counter += 1
-
 
 # stack all into 1D arrays
 t_all = np.concatenate(t_all)
@@ -101,7 +102,7 @@ def scaled_residuals(params, t, T, L, dataset_idx, y):
 
     # loop by dataset to use dataset-specific η and analytic scale
     for idx in np.unique(dataset_idx):
-        mask = (dataset_idx == idx)
+        mask = dataset_idx == idx
         eta_k = eta_vec[int(idx)]
 
         y_pred_sub = fit_function((t[mask], T[mask], L[mask]), r, b, eta_k)
@@ -116,7 +117,6 @@ def scaled_residuals(params, t, T, L, dataset_idx, y):
 
     return residuals
 
-
 def objective(params, t, T, L, dataset_idx, y):
     resids = scaled_residuals(params, t, T, L, dataset_idx, y)
     return np.sum(resids**2)
@@ -126,14 +126,13 @@ p0 = [10, 10] + [0.5] * dataset_counter
 
 # === Run optimization ===
 res = least_squares(
-    scaled_residuals, p0,  method="lm",
+    scaled_residuals,
+    p0,
+    method="lm",
     args=(t_all, T_all, L_all, dataset_idx, y_all),
-    # Optional robustness:
-    # loss='soft_l1', f_scale=0.5
 )
 fit_params = res.x
 jacobian = res.jac
-
 
 # === Estimate parameter uncertainties ===
 residuals = scaled_residuals(fit_params, t_all, T_all, L_all, dataset_idx, y_all)
@@ -153,14 +152,51 @@ r_err, b_err = param_errors[0], param_errors[1]
 eta_vec = fit_params[2:]
 eta_errs = param_errors[2:]
 
-print("\n=== Global Fit Results (auto-scaled per dataset) ===")
+print("\n=== Global Fit Results ===")
 print(f"r = {r:.4g} ± {r_err:.4g}")
 print(f"b = {b:.4g} ± {b_err:.4g}")
-for k, (e, ee) in enumerate(zip(eta_vec, eta_errs)):
-    print(f"η[{k}] = {e:.4g} ± {ee:.4g}")
 
+# === Collect per-dataset parameters ===
+L_list = []
+T_list = []
+eta_list = []
+eta_err_list = []
+s_list = []
+exp_list = [] 
 
-# === Plotting per dataset (with infimum scaling and shaded uncertainties) ===
+for file_name, data in data_dict.items():
+    idx = data["dataset_index"]
+    L_i = data["fiber_length"]
+    T_i = data["coincidence_window"]
+    exp_i = data["exposure_time"]
+    eta_i = eta_vec[idx]
+    eta_i_err = eta_errs[idx]
+
+    # Compute per-dataset analytic scale
+    mask = dataset_idx == idx
+    y_pred_sub = fit_function((t_all[mask], T_all[mask], L_all[mask]), r, b, eta_i)
+    y_sub = y_all[mask]
+    numerator = np.sum(y_pred_sub * y_sub)
+    denominator = np.sum(y_pred_sub**2)
+    s_i = numerator / denominator if denominator != 0 else 1.0
+
+    L_list.append(L_i)
+    T_list.append(T_i)
+    eta_list.append(eta_i)
+    eta_err_list.append(eta_i_err)
+    s_list.append(s_i)
+    exp_list.append(exp_i)
+
+# === Print per-dataset summary ===
+print("\n=== Per-Dataset Parameters ===")
+print(f"{'Idx':>3} | {'L (km)':>8} | {'T (ps)':>8} | {'η':>8} ± {'ση':<8} | {'s_i':>8} | {'exp_time (ms)':>10}")
+print("-" * 65)
+for k, (L_i, T_i, eta_i, eta_err_i, s_i, exp_i) in enumerate(
+    zip(L_list, T_list, eta_list, eta_err_list, s_list, exp_list)
+):
+    print(f"{k:>3} | {L_i:8.3f} | {T_i:8.3f} | {eta_i:8.4f} ± {eta_err_i:<8.4f} | {s_i:8.4f} | {str(exp_i):>10}")
+
+# === Plotting per dataset ===
 for file_name, data in data_dict.items():
     idx = data["dataset_index"]
     r, b = fit_params[0], fit_params[1]
@@ -189,30 +225,23 @@ for file_name, data in data_dict.items():
     # Plot fitted line
     plt.plot(x_data[0], y_pred, "-", color="red", label="fit", linewidth=1.5)
 
-    # Axis labels and title
     plt.xlabel("Delay [ps]", fontsize=11)
     plt.ylabel("Coincidence count [-]", fontsize=11)
 
-    # Axis span chosen based on data range with margins
     x_margin = 0.05 * (np.max(x_data[0]) - np.min(x_data[0]))
     y_margin = 0.05 * (np.max(y_scaled) - np.min(y_scaled))
     plt.xlim(np.min(x_data[0]) - x_margin, np.max(x_data[0]) + x_margin)
     plt.ylim(np.min(y_scaled) - y_margin, np.max(y_scaled) + y_margin)
 
-    # Grid and ticks
-    plt.grid(True, which='both', linestyle=':', linewidth=0.6)
+    plt.grid(True, which="both", linestyle=":", linewidth=0.6)
     plt.minorticks_on()
-    plt.tick_params(which='both', direction='in', top=True, right=True)
-    plt.tick_params(axis='both', which='major', length=6, width=1)
-    plt.tick_params(axis='both', which='minor', length=3, width=0.8)
+    plt.tick_params(which="both", direction="in", top=True, right=True)
+    plt.tick_params(axis="both", which="major", length=6, width=1)
+    plt.tick_params(axis="both", which="minor", length=3, width=0.8)
 
-    # Legend
     plt.legend(frameon=False, fontsize=9)
-
-    # Tight layout for better spacing
     plt.tight_layout()
 
-    # Save figure
     os.makedirs("Figures", exist_ok=True)
     plt.savefig(f"Figures/Fit_{file_name}.png", dpi=500, bbox_inches="tight")
     plt.close()
