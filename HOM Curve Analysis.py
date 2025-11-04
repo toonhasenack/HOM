@@ -181,17 +181,38 @@ for file_name, data in data_dict.items():
     scale = numerator / denominator if denominator != 0 else 1.0
     y_scaled = y * scale
 
-    plt.figure()
-    plt.plot(x_data[0], y_scaled, "o", label="data", markersize=1)
-    plt.plot(x_data[0], y_pred, "-", color="C1", label="fit", linewidth=0.5)
-    plt.xlabel("Delay [ps]")
-    plt.ylabel("Coincidence rate [Hz]")
-    plt.title(
-        f"{file_name}\n"
-        f"r={r:.3f}±{r_err:.3g}, b={b:.3f}±{b_err:.3g}, η[{idx}]={eta_k:.3f}±{eta_k_err:.3g}"
-    )
-    plt.legend()
-    plt.grid()
+    plt.figure(figsize=(4.5, 3.5), dpi=300)
+
+    # Plot data points
+    plt.plot(x_data[0], y_scaled, "+", color="black", label="data", markersize=4, markeredgewidth=1)
+
+    # Plot fitted line
+    plt.plot(x_data[0], y_pred, "-", color="red", label="fit", linewidth=1.5)
+
+    # Axis labels and title
+    plt.xlabel("Delay [ps]", fontsize=11)
+    plt.ylabel("Coincidence count [-]", fontsize=11)
+
+    # Axis span chosen based on data range with margins
+    x_margin = 0.05 * (np.max(x_data[0]) - np.min(x_data[0]))
+    y_margin = 0.05 * (np.max(y_scaled) - np.min(y_scaled))
+    plt.xlim(np.min(x_data[0]) - x_margin, np.max(x_data[0]) + x_margin)
+    plt.ylim(np.min(y_scaled) - y_margin, np.max(y_scaled) + y_margin)
+
+    # Grid and ticks
+    plt.grid(True, which='both', linestyle=':', linewidth=0.6)
+    plt.minorticks_on()
+    plt.tick_params(which='both', direction='in', top=True, right=True)
+    plt.tick_params(axis='both', which='major', length=6, width=1)
+    plt.tick_params(axis='both', which='minor', length=3, width=0.8)
+
+    # Legend
+    plt.legend(frameon=False, fontsize=9)
+
+    # Tight layout for better spacing
+    plt.tight_layout()
+
+    # Save figure
     os.makedirs("Figures", exist_ok=True)
-    plt.savefig(f"Figures/Fit_{file_name}_shaded.png", dpi=500)
+    plt.savefig(f"Figures/Fit_{file_name}.png", dpi=500, bbox_inches="tight")
     plt.close()
