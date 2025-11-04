@@ -117,10 +117,6 @@ def scaled_residuals(params, t, T, L, dataset_idx, y):
 
     return residuals
 
-def objective(params, t, T, L, dataset_idx, y):
-    resids = scaled_residuals(params, t, T, L, dataset_idx, y)
-    return np.sum(resids**2)
-
 # === Initial guess & bounds ===
 p0 = [10, 10] + [0.5] * dataset_counter
 
