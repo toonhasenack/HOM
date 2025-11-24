@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from scipy.optimize import least_squares
 from scipy.special import erf
 from scipy.signal import savgol_filter
@@ -61,7 +62,7 @@ for file_name in file_names:
 
     # 4. Center the data around the parabola minimum
     stage_position -= center
-    stage_position *= 1e1 / 3.0  # ps
+    stage_position *= 1e1 / 2.998  # ps
 
     max_stage_position = 9
     bm = np.logical_and(stage_position <= max_stage_position, stage_position >= -max_stage_position)
@@ -149,8 +150,8 @@ eta_vec = fit_params[2:]
 eta_errs = param_errors[2:]
 
 print("\n=== Global Fit Results ===")
-print(f"r = {r:.4g} ± {r_err:.4g}")
-print(f"b = {b:.4g} ± {b_err:.4g}")
+print(f"r = {r:.4g} ± {r_err:.4g} 1/ps²")
+print(f"β₂ = {b:.4g} ± {b_err:.4g} ps²/km")
 
 # === Collect per-dataset parameters ===
 L_list = []
@@ -241,3 +242,45 @@ for file_name, data in data_dict.items():
     os.makedirs("Figures", exist_ok=True)
     plt.savefig(f"Figures/Fit_{file_name}.png", dpi=500, bbox_inches="tight")
     plt.close()
+
+# === 3D Scatter plot: T vs L vs RMS residuals ===
+rms_residuals = []
+T_unique = []
+L_unique = []
+
+for file_name, data in data_dict.items():
+    idx = data["dataset_index"]
+    T_i = data["coincidence_window"]/1000
+    L_i = data["fiber_length"]
+
+    # Collect per–dataset residuals
+    mask = dataset_idx == idx
+    res_i = residuals[mask]
+
+    rms_i = np.sqrt(np.mean(res_i**2))
+
+    rms_residuals.append(rms_i)
+    T_unique.append(T_i)
+    L_unique.append(L_i)
+
+# Create the 3D scatter plot
+fig = plt.figure(figsize=(7, 6), dpi=300)
+ax = fig.add_subplot(111, projection="3d")
+
+sc = ax.scatter(
+    T_unique, L_unique, rms_residuals,
+    c=rms_residuals,
+    cmap="viridis",
+    s=60,
+    edgecolor="k",
+    alpha=0.85
+)
+
+ax.view_init(elev=25, azim=35)
+
+ax.set_xlabel(r"$T$ [ns]", fontsize=12)
+ax.set_ylabel(r"$L$ [km]", fontsize=12)
+ax.set_zlabel("RMS Residual", fontsize=12)
+
+plt.tight_layout()
+plt.show()
