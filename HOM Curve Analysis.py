@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import csv
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.optimize import least_squares
@@ -284,3 +285,77 @@ ax.set_zlabel("RMS Residual", fontsize=12)
 
 plt.tight_layout()
 plt.show()
+
+csv_path = os.path.join(base_path, "dataset_fit_summary.csv")
+
+with open(csv_path, "w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+
+    # --- Header ---
+    writer.writerow([
+        "Entry Type",
+        "Dataset Index",
+        "Fiber Length (km)",
+        "Coincidence Window (ps)",
+        "η",
+        "ση",
+        "Scale Factor s_i",
+        "Exposure Time (ms)",
+        "N Points",
+        "RMS Residual",
+        "r (1/ps^2)",
+        "σ_r",
+        "beta2 (ps^2/km)",
+        "σ_beta2"
+    ])
+
+    # --- Global parameters row ---
+    writer.writerow([
+        "GLOBAL", "", "", "", "", "", "", "", "", "",
+        r, r_err, b, b_err
+    ])
+
+    # --- Compute RMS residuals per dataset ---
+    rms_residuals_dict = {}
+    for file_name, data in data_dict.items():
+        idx = data["dataset_index"]
+        mask = dataset_idx == idx
+        res_i = residuals[mask]
+        rms_residuals_dict[idx] = np.sqrt(np.mean(res_i**2))
+
+    # --- Per-dataset rows ---
+    for file_name, data in data_dict.items():
+        idx = data["dataset_index"]
+
+        L_i = data["fiber_length"]
+        T_i = data["coincidence_window"]
+        exp_i = data["exposure_time"]
+        eta_i = eta_vec[idx]
+        eta_err_i = eta_errs[idx]
+
+        # Analytic scale factor
+        mask = dataset_idx == idx
+        y_pred_sub = fit_function(
+            (t_all[mask], T_all[mask], L_all[mask]),
+            r, b, eta_i
+        )
+        y_sub = y_all[mask]
+        numerator = np.sum(y_pred_sub * y_sub)
+        denominator = np.sum(y_pred_sub**2)
+        s_i = numerator / denominator if denominator != 0 else 1.0
+
+        writer.writerow([
+            "DATASET",
+            idx,
+            L_i,
+            T_i,
+            eta_i,
+            eta_err_i,
+            s_i,
+            exp_i,
+            np.sum(mask),         # Number of points
+            rms_residuals_dict[idx],
+            "", "", "", ""        # Global columns empty
+        ])
+
+print(f"\nCSV summary written to: {csv_path}")
