@@ -1,2 +1,2 @@
-peak_transmittance,mu_rad_per_ps,center_wavelength_nm,s_rad2_per_ps2,fwhm_omega_rad_per_ps,r2_T,n_points
+peak_field,mu_rad_per_ps,center_wavelength_nm,s_rad2_per_ps2,fwhm_omega_rad_per_ps,r2_T,n_points
 0.9999999999999999,1217.8991377107902,1546.6400369158948,16.300279957840704,9.507257478292287,0.9404461110530856,1561

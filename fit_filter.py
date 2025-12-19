@@ -16,7 +16,7 @@ def lambda_nm_to_omega_radps(lambda_nm: np.ndarray) -> np.ndarray:
 
 
 def gaussian_y_omega(omega, A, mu, s):
-    """Gaussian transmittance in angular frequency with s = sigma^2."""
+    """Gaussian Field in angular frequency with s = sigma^2."""
     return A * np.exp(-((omega - mu) ** 2) / (2*s))
 
 def main():
@@ -69,7 +69,7 @@ def main():
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else np.nan
 
     out = pd.DataFrame([{
-        "peak_transmittance": A,
+        "peak_field": A,
         "mu_rad_per_ps": mu,
         "center_wavelength_nm": center_lambda_nm,
         "s_rad2_per_ps2": s,
@@ -85,12 +85,12 @@ def main():
     if not args.no_plot:
         omega_dense = np.linspace(omega.min(), omega.max(), 10000)
         plt.figure()
-        plt.scatter(omega, y, s=20, label="Measured transmittance (0–1)")
+        plt.scatter(omega, y, s=20, label="Measured field (0–1)")
         plt.plot(omega_dense, gaussian_y_omega(omega_dense, *popt),
                  label="Gaussian fit (ω-space)")
         plt.xlabel("Angular frequency ω (rad/ps)")
-        plt.ylabel("Transmittance")
-        plt.title("Gaussian Transmittance Fit in Angular Frequency Space")
+        plt.ylabel("Field")
+        plt.title("Gaussian Field Fit in Angular Frequency Space")
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
