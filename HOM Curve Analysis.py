@@ -7,6 +7,9 @@ from scipy.optimize import least_squares
 from scipy.special import erf
 from scipy.signal import savgol_filter
 
+plt.rcParams['xtick.labelsize'] = 14
+plt.rcParams['ytick.labelsize'] = 14
+
 # === Paths ===
 base_path = os.path.dirname(os.path.abspath(__file__))
 data_path = os.path.join(base_path, "Data")
@@ -223,8 +226,8 @@ for file_name, data in data_dict.items():
     # Plot fitted line
     plt.plot(x_data[0], y_pred, "-", color="red", label="fit", linewidth=1.5)
 
-    plt.xlabel("Delay [ps]", fontsize=11)
-    plt.ylabel("Coincidence count [-]", fontsize=11)
+    plt.xlabel("Delay [ps]", fontsize=18)
+    plt.ylabel("Coincidence count [-]", fontsize=18)
 
     x_margin = 0.05 * (np.max(x_data[0]) - np.min(x_data[0]))
     y_margin = 0.05 * (np.max(y_scaled) - np.min(y_scaled))
@@ -246,42 +249,52 @@ for file_name, data in data_dict.items():
 
 # === 3D Scatter plot: T vs L vs RMS residuals ===
 rms_residuals = []
-T_unique = []
-L_unique = []
+T_vals = []
+L_vals = []
 
 for file_name, data in data_dict.items():
     idx = data["dataset_index"]
-    T_i = data["coincidence_window"]/1000
-    L_i = data["fiber_length"]
+    T_i = data["coincidence_window"] / 1000  # ns
+    L_i = data["fiber_length"]               # km
 
-    # Collect per–dataset residuals
     mask = dataset_idx == idx
     res_i = residuals[mask]
 
     rms_i = np.sqrt(np.mean(res_i**2))
 
     rms_residuals.append(rms_i)
-    T_unique.append(T_i)
-    L_unique.append(L_i)
+    T_vals.append(T_i)
+    L_vals.append(L_i)
 
-# Create the 3D scatter plot
-fig = plt.figure(figsize=(7, 6), dpi=300)
-ax = fig.add_subplot(111, projection="3d")
+T_vals = np.array(T_vals)
+L_vals = np.array(L_vals)
+rms_residuals = np.array(rms_residuals)
 
-sc = ax.scatter(
-    T_unique, L_unique, rms_residuals,
-    c=rms_residuals,
-    cmap="viridis",
-    s=60,
-    edgecolor="k",
-    alpha=0.85
-)
+# To be plotted fiber lengths
+L_plot = [5.0, 10.0]
 
-ax.view_init(elev=25, azim=35)
+# Not to be plotted coincidence rates
+T_plot = [1.0]
 
-ax.set_xlabel(r"$T$ [ns]", fontsize=12)
-ax.set_ylabel(r"$L$ [km]", fontsize=12)
-ax.set_zlabel("RMS Residual", fontsize=12)
+# Plot
+fig, ax = plt.subplots(figsize=(7, 5), dpi=300)
+
+for i, L in enumerate(L_plot):
+    mask = np.logical_and(L_vals == L, T_vals != T_plot)
+    ax.scatter(
+        T_vals[mask],
+        rms_residuals[mask],
+        s=70,
+        edgecolor="k",
+        alpha=0.85,
+        label=fr"$L = {L}$ km"
+    )
+
+ax.set_xlabel(r"$T$ [ns]", fontsize=18)
+ax.set_ylabel("RMS Residual", fontsize=18)
+
+ax.legend(fontsize=14)
+ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
 plt.show()
