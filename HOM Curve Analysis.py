@@ -38,6 +38,44 @@ def fit_function(x, r, b, eta):
     ans[np.isnan(ans.real)] = 0 + 0j
     return ans.real
 
+
+# === FWHM function ===
+def fwhm_interp(x, y):
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    if x.ndim != 1 or y.ndim != 1 or x.size != y.size:
+        raise ValueError("x and y must be 1D arrays of the same length")
+
+    y_work = -y
+
+    i0 = int(np.argmax(y_work))           # location of peak in y_work
+    y0 = y_work[i0]
+    yb = np.min(y_work)                   # baseline estimate (simple)
+    half = yb + 0.5 * (y0 - yb)           # half-maximum level
+
+    # Find left crossing: last index < i0 where y crosses half
+    left_idxs = np.where(y_work[:i0] < half)[0]
+    if left_idxs.size == 0:
+        raise ValueError("No left half-maximum crossing found")
+    i1 = left_idxs[-1]     # above half
+    i2 = i1 + 1            # below half (closer to trough)
+
+    # Linear interpolation for left crossing
+    x_left = x[i1] + (half - y_work[i1]) * (x[i2] - x[i1]) / (y_work[i2] - y_work[i1])
+
+    # Find right crossing: first index > i0 where y crosses half
+    right_idxs = np.where(y_work[i0+1:] < half)[0]
+    if right_idxs.size == 0:
+        raise ValueError("No right half-maximum crossing found")
+    j2 = i0 + 1 + right_idxs[0]  # above half
+    j1 = j2 - 1                  # below half
+
+    # Linear interpolation for right crossing
+    x_right = x[j1] + (half - y_work[j1]) * (x[j2] - x[j1]) / (y_work[j2] - y_work[j1])
+
+    return x_right - x_left
+
 # === Collect all data ===
 t_all, T_all, L_all, y_all, dataset_idx = [], [], [], [], []
 dataset_counter = 0
@@ -213,10 +251,16 @@ for file_name, data in data_dict.items():
 
     y_pred = fit_function(x_data, r, b, eta_k)
 
+    data["coincidences_predicted"] = y_pred
+
     numerator = np.sum(y_pred * y)
     denominator = np.sum(y**2)
     scale = numerator / denominator if denominator != 0 else 1.0
     y_scaled = y * scale
+
+    data["coincidences_scaled"] = y_scaled
+
+    data_dict[file_name] = data
 
     plt.figure(figsize=(4.5, 3.5), dpi=300)
 
@@ -247,7 +291,87 @@ for file_name, data in data_dict.items():
     plt.savefig(f"Figures/Fit_{file_name}.png", dpi=500, bbox_inches="tight")
     plt.close()
 
-# === 3D Scatter plot: T vs L vs RMS residuals ===
+
+# === Single plot: FWHM vs L, multiple T (colored) ===
+f_vals, T_vals, L_vals = [], [], []
+
+r, b = fit_params[0], fit_params[1]
+taup = np.linspace(np.min(t_all), np.max(t_all), 10000)
+
+# collect measured points
+for _, data in data_dict.items():
+    tau_i = data["stage_position"]
+    T_i   = data["coincidence_window"]   # ps
+    L_i   = data["fiber_length"]         # km
+    c_i   = data["coincidences_scaled"]
+
+    f_vals.append(fwhm_interp(tau_i, c_i))
+    T_vals.append(T_i)
+    L_vals.append(L_i)
+
+T_vals = np.array(T_vals)
+L_vals = np.array(L_vals)
+f_vals = np.array(f_vals)
+
+Ts = np.unique(T_vals)
+
+L_min = 0
+L_max = np.max(L_vals)
+
+L_grid_global = np.linspace(L_min, L_max, 400)  # prediction range for ALL T
+
+fig, ax = plt.subplots(figsize=(7, 5), dpi=300)
+
+# optional: color map for many curves
+cmap = plt.get_cmap("tab10")  # or "viridis"
+colors = [cmap(i % cmap.N) for i in range(len(Ts))]
+
+for k, T in enumerate(Ts):
+    mask = (T_vals == T)
+    L_data = L_vals[mask]
+    f_data = f_vals[mask]
+
+    # sort data points by L (important for clean plotting)
+    order = np.argsort(L_data)
+    L_data = L_data[order]
+    f_data = f_data[order]
+
+    # predicted FWHM(L)
+    fp_grid = np.empty_like(L_grid_global, dtype=float)
+    for j, Lg in enumerate(L_grid_global):
+        x_pred = (taup,
+                  np.full_like(taup, T, dtype=float),
+                  np.full_like(taup, Lg, dtype=float))
+        cp = fit_function(x_pred, r, b, 1/2)
+        fp_grid[j] = fwhm_interp(taup, cp)
+
+    col = colors[k]
+
+    # measured points
+    ax.plot(L_data, f_data, "+", color=col, markersize=6, markeredgewidth=2, alpha=0.85)
+
+    # predicted curve
+    ax.plot(L_grid_global, fp_grid, "-", color=col, label=f"T = {T/1000:.3g} ns", linewidth = 1.5, alpha=0.85)
+
+ax.set_xlim(L_min,L_max)
+
+ax.set_xlabel("Fiber Length [km]", fontsize=18)
+ax.set_ylabel("FWHM [ps]", fontsize=18)
+
+ax.grid(True, which="both", linestyle=":", linewidth=0.6)
+ax.minorticks_on()
+ax.tick_params(which="both", direction="in", top=True, right=True)
+ax.tick_params(axis="both", which="major", length=6, width=1)
+ax.tick_params(axis="both", which="minor", length=3, width=0.8)
+
+ax.set_yscale("log")
+
+ax.legend(frameon=False, fontsize=9, ncols=1)  # set ncols=2 if many T
+plt.tight_layout()
+plt.savefig("Figures/FWHM_all_T.png", dpi=500, bbox_inches="tight")
+plt.close()
+
+# === 2D Scatter plot: T RMS residuals per L ===
 rms_residuals = []
 T_vals = []
 L_vals = []
@@ -300,7 +424,6 @@ plt.tight_layout()
 plt.show()
 
 csv_path = os.path.join(base_path, "dataset_fit_summary.csv")
-
 with open(csv_path, "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
 
