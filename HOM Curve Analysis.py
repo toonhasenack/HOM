@@ -4,7 +4,7 @@ import csv
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.optimize import least_squares
-from scipy.special import erf
+from scipy.special import erf, erfcx
 from scipy.signal import savgol_filter
 
 plt.rcParams['xtick.labelsize'] = 14
@@ -16,27 +16,45 @@ data_path = os.path.join(base_path, "Data")
 file_names = [f for f in os.listdir(data_path) if f.endswith(".csv")]
 data_dict = {}
 
-# === Fit function ===
+
+def exp_erf_stable(z1, z2):
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        ez1 = np.exp(z1)
+        return ez1 - np.exp(z1 - z2*z2) * erfcx(z2)
+
+# === Fit function (stable) ===
 def fit_function(x, r, b, eta):
     t, T, L = x
-    rp = r / (1 + (b * L * r) ** 2)
-    rho = np.maximum(r - rp, 0)
-    eta = (2 * eta - 1) ** 2
 
-    ans = (
-        1 / 4
-        * (
-            (1 + eta) * erf(np.sqrt(rp / 2) * (T + t))
-            + (1 + eta) * erf(np.sqrt(rp / 2) * (T - t))
-            - (1 - eta) * np.exp(-r * t**2 / 2)
-            * (
-                erf(np.sqrt(rp / 2) * T + 1j * np.sqrt(rho / 2) * t)
-                + erf(np.sqrt(rp / 2) * T - 1j * np.sqrt(rho / 2) * t)
-            )
-        )
-    )
-    ans[np.isnan(ans.real)] = 0 + 0j
-    return ans.real
+    rp = r / (1 + (b * L * r) ** 2)
+    rho = np.maximum(r - rp, 0.0)
+    eta2 = (2 * eta - 1) ** 2  # keep your mapping
+
+    # Real-only erf terms (these are stable)
+    a = np.sqrt(rp / 2.0)
+    term_real = (1 + eta2) * (erf(a * (T + t)) + erf(a * (T - t)))
+
+    # Build the complex argument for erf(...)
+    # z = sqrt(rp/2)*T + i*sqrt(rho/2)*t
+    z = a * T + 1j * np.sqrt(rho / 2.0) * t
+
+    # We need: exp(-r t^2/2) * ( erf(z) + erf(conj(z)) )
+    # Since exp(-r t^2/2) is real, this equals:
+    # 2 * Re( exp(-r t^2/2) * erf(z) )
+    z1 = -0.5 * r * t**2  # log prefactor
+
+    # Stable evaluation of exp(z1) * erf(z), then take 2*Re(...)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        exp_erf_val = exp_erf_stable(z1, z)          # complex array
+        complex_block = 2.0 * np.real(exp_erf_val)   # real array
+
+    term_complex = (1 - eta2) * complex_block
+
+    ans = 0.25 * (term_real - term_complex)
+
+    # Final cleanup (just in case)
+    ans = np.where(np.isfinite(ans), ans, 0.0)
+    return ans
 
 
 # === FWHM function ===
@@ -106,7 +124,7 @@ for file_name in file_names:
     stage_position -= center
     stage_position *= 1e1 / 2.998  # ps
 
-    max_stage_position = 9
+    max_stage_position = 20
     bm = np.logical_and(stage_position <= max_stage_position, stage_position >= -max_stage_position)
     stage_position = stage_position[bm]
     coincidences = coincidences[bm]
@@ -284,7 +302,7 @@ for file_name, data in data_dict.items():
     plt.tick_params(axis="both", which="major", length=6, width=1)
     plt.tick_params(axis="both", which="minor", length=3, width=0.8)
 
-    plt.legend(frameon=False, fontsize=9)
+    plt.legend(frameon=False, fontsize=14)
     plt.tight_layout()
 
     os.makedirs("Figures", exist_ok=True)
@@ -295,14 +313,21 @@ for file_name, data in data_dict.items():
 # === Single plot: FWHM vs L, multiple T (colored) ===
 f_vals, T_vals, L_vals = [], [], []
 
-r, b = fit_params[0], fit_params[1]
-taup = np.linspace(np.min(t_all), np.max(t_all), 10000)
+# dataset names (keys in data_dict) to exclude
+exclude_datasets = {
+    "Tieme 2025-07-16 11.48 exptime=200 ccwin=1000 length=29.csv",
+    "Tieme 2025-07-16 13.53 exptime=500 ccwin=100 length=10.csv"
+}
 
-# collect measured points
-for _, data in data_dict.items():
+r, b = fit_params[0], fit_params[1]
+taup = np.linspace(-50, 50, 20000)
+for file_name, data in data_dict.items():
+    if file_name in exclude_datasets:
+        continue
+
     tau_i = data["stage_position"]
     T_i   = data["coincidence_window"]   # ps
-    L_i   = data["fiber_length"]         # km
+    L_i   = data["fiber_length"]          # km
     c_i   = data["coincidences_scaled"]
 
     f_vals.append(fwhm_interp(tau_i, c_i))
@@ -316,11 +341,11 @@ f_vals = np.array(f_vals)
 Ts = np.unique(T_vals)
 
 L_min = 0
-L_max = np.max(L_vals)
+L_max = np.max(L_vals) + 1
 
 L_grid_global = np.linspace(L_min, L_max, 400)  # prediction range for ALL T
 
-fig, ax = plt.subplots(figsize=(7, 5), dpi=300)
+fig, ax = plt.subplots(figsize=(7, 7), dpi=300)
 
 # optional: color map for many curves
 cmap = plt.get_cmap("tab10")  # or "viridis"
@@ -336,24 +361,45 @@ for k, T in enumerate(Ts):
     L_data = L_data[order]
     f_data = f_data[order]
 
-    # predicted FWHM(L)
-    fp_grid = np.empty_like(L_grid_global, dtype=float)
-    for j, Lg in enumerate(L_grid_global):
-        x_pred = (taup,
-                  np.full_like(taup, T, dtype=float),
-                  np.full_like(taup, Lg, dtype=float))
-        cp = fit_function(x_pred, r, b, 1/2)
-        fp_grid[j] = fwhm_interp(taup, cp)
+    if len(L_data) > 0:
+        # predicted FWHM(L)
+        fp_grid = np.empty_like(L_grid_global, dtype=float)
+        for j, Lg in enumerate(L_grid_global):
+            x_pred = (
+                taup,
+                np.full_like(taup, T, dtype=float),
+                np.full_like(taup, Lg, dtype=float),
+            )
+            cp = fit_function(x_pred, r, b, 1 / 2)
+            fp_grid[j] = fwhm_interp(taup, cp)
 
-    col = colors[k]
+        col = colors[k]
 
-    # measured points
-    ax.plot(L_data, f_data, "+", color=col, markersize=6, markeredgewidth=2, alpha=0.85)
+        # measured points
+        ax.plot(
+            L_data,
+            f_data,
+            "+",
+            color=col,
+            markersize=6,
+            markeredgewidth=2,
+            alpha=0.85,
+        )
 
-    # predicted curve
-    ax.plot(L_grid_global, fp_grid, "-", color=col, label=f"T = {T/1000:.3g} ns", linewidth = 1.5, alpha=0.85)
+        # predicted curve
+        ax.plot(
+            L_grid_global,
+            fp_grid,
+            "-",
+            color=col,
+            label=f"T = {T/1000:.3g} ns",
+            linewidth=1.5,
+            alpha=0.85,
+        )
 
-ax.set_xlim(L_min,L_max)
+# axes formatting
+ax.set_xlim(L_min, L_max)
+ax.set_ylim(0.5, 3.5)
 
 ax.set_xlabel("Fiber Length [km]", fontsize=18)
 ax.set_ylabel("FWHM [ps]", fontsize=18)
@@ -364,10 +410,26 @@ ax.tick_params(which="both", direction="in", top=True, right=True)
 ax.tick_params(axis="both", which="major", length=6, width=1)
 ax.tick_params(axis="both", which="minor", length=3, width=0.8)
 
-ax.set_yscale("log")
+ax.set_yscale("linear")
 
-ax.legend(frameon=False, fontsize=9, ncols=1)  # set ncols=2 if many T
-plt.tight_layout()
+# -------------------------
+# Legend on top (3 x 3 grid)
+# -------------------------
+handles, labels = ax.get_legend_handles_labels()
+ax.legend(
+    handles,
+    labels,
+    loc="lower center",
+    bbox_to_anchor=(0.5, 1.02),
+    ncols=3,
+    frameon=False,
+    fontsize=13,
+    columnspacing=1.2,
+    handlelength=2.2,
+)
+
+# leave room for top legend
+plt.tight_layout(rect=[0, 0, 1, 0.90])
 plt.savefig("Figures/FWHM_all_T.png", dpi=500, bbox_inches="tight")
 plt.close()
 
